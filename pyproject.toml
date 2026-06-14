@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gabc-tools"
+version = "0.1.0"
+description = "Pure GABC parsing, transposition, and melodic-similarity analysis for Gregorian chant (no database access)."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "pyphen",
+    "unidecode",
+]
+
+[project.optional-dependencies]
+viz = [
+    "bokeh",
+]
+
+[tool.setuptools.packages.find]
+include = ["gabc_tools*"]
