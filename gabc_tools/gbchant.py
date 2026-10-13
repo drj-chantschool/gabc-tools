@@ -115,20 +115,17 @@ class GBChant:
         self.mode = gbrow.get('mode')
         self.id = gbrow.get('id')
         self.verses = gbrow.get('tex_verses')
+        self.tex_verses = self.verses
+        self.gabc_verses = gbrow.get('gabc_verses')
         self.commentary = gbrow.get('commentary')
         self.incipit = gbrow.get('incipit')
-        try:
-            mygabcobj = json.loads(gbrow['gabc'])
-            if isinstance(mygabcobj, str):
-                self.gabc = mygabcobj
-            else:
-                for myattr in mygabcobj:
-                    if myattr[0] == 'gabc':
-                        self.gabc = myattr[1]
-        except:
-            self.gabc = (gbrow.get('gabc', '') or '') + (gbrow.get('gabc_verses', '') or '')
-        if self.gabc is None:
-            raise ValueError('Could not extract gabc:', mygabcobj, type(mygabcobj))
+        # The first verse only (all gabc pieces of a multi-part chant, without
+        # gabc_verses); use full_gabc() for the whole chant as GregoBase prints it.
+        self.gabc = extract_gabc_body(gbrow.get('gabc') or '')
+
+    def full_gabc(self) -> str:
+        """The GABC body plus ``gabc_verses``, as GregoBase's full GABC download gives it."""
+        return join_gabc_verses(self.gabc, self.gabc_verses)
 
     @staticmethod
     def f_clef_to_c(myneumes: str):
@@ -211,30 +208,52 @@ class GBChant:
             raise EncodingWarning('gabc was not properly parsed', other, self.gabc)
 
 
-def extract_gabc_body(gabc_raw: str) -> str:
+def gabc_elements(gabc_raw: str) -> list[tuple[str, str]]:
+    """
+    Split a raw ``gregobase_chants.gabc`` value into ``(kind, content)`` elements.
+
+    GregoBase stores ``gabc`` as plain ``header\\n%%\\nbody`` text, a JSON
+    string, or a JSON list of ``[kind, content, ...]`` elements where kind is
+    ``'gabc'`` or ``'tex'`` (a multi-part chant: several scores, with TeX
+    spacing tweaks or rubrics between them). Plain and JSON-string values come
+    back as a single ``('gabc', ...)`` element.
+    """
+    if not gabc_raw:
+        return []
+    try:
+        obj = json.loads(gabc_raw)
+    except (ValueError, TypeError):
+        return [('gabc', gabc_raw)]
+    if isinstance(obj, str):
+        return [('gabc', obj)]
+    if isinstance(obj, list):
+        return [(item[0], item[1]) for item in obj
+                if isinstance(item, (list, tuple)) and len(item) >= 2 and isinstance(item[1], str)]
+    return [('gabc', gabc_raw)]
+
+
+def _strip_gabc_header(gabc_text: str) -> str:
+    parts = gabc_text.split('%%')
+    return parts[-1].strip() if len(parts) > 1 else gabc_text.strip()
+
+
+def join_gabc_verses(body: str, gabc_verses: str | None) -> str:
+    """Append ``gabc_verses`` to a body the way GregoBase's full download does."""
+    return f'{body}\n{gabc_verses.strip()}' if gabc_verses and gabc_verses.strip() else body
+
+
+def extract_gabc_body(gabc_raw: str, gabc_verses: str | None = None) -> str:
     """
     Extract the GABC body (everything after ``%%``) from a raw ``gabc`` field.
 
-    Handles both JSON-encoded ``gabc`` fields (as stored in
-    ``gregobase_chants``, sometimes a JSON string or a list of
-    ``[key, value]`` pairs with a ``gabc`` entry) and plain
-    ``header\\n%%\\nbody`` text.
+    Handles every storage form described in :func:`gabc_elements`. For a
+    multi-part chant all ``gabc`` elements are joined in order (as GregoBase's
+    own renderer does); ``tex`` elements are dropped. Pass the row's
+    ``gabc_verses`` to get the whole chant with verses 2..n, as in GregoBase's
+    full GABC download; without it you get the first verse only.
     """
-    if not gabc_raw:
-        return ''
-    try:
-        obj = json.loads(gabc_raw)
-        if isinstance(obj, str):
-            gabc_raw = obj
-        elif isinstance(obj, list):
-            for item in obj:
-                if isinstance(item, (list, tuple)) and item[0] == 'gabc':
-                    gabc_raw = item[1]
-                    break
-    except (ValueError, TypeError):
-        pass
-    parts = gabc_raw.split('%%')
-    return parts[-1].strip() if len(parts) > 1 else gabc_raw.strip()
+    pieces = [_strip_gabc_header(c) for k, c in gabc_elements(gabc_raw) if k == 'gabc']
+    return join_gabc_verses('\n'.join(p for p in pieces if p), gabc_verses)
 
 
 def parse_gabc_header(gabc_text: str) -> dict:
